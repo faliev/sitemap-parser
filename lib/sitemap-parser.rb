@@ -2,6 +2,7 @@
 
 require 'nokogiri'
 require 'typhoeus'
+require 'uri'
 require 'zlib'
 require_relative 'sitemap-parser/version'
 
@@ -18,6 +19,7 @@ class SitemapParser
 
   def initialize(url, opts = {})
     @url = url
+    @url_parsed = URI.parse(@url)
     @options = DEFAULT_OPTIONS.merge(opts)
   end
 
@@ -32,6 +34,7 @@ class SitemapParser
   def urls
     @urls ||= if urlset
                 filter_sitemap_urls(urlset.search('url'))
+                
               elsif sitemapindex
                 options[:recurse] ? parse_sitemap_index : []
               else
@@ -45,16 +48,19 @@ class SitemapParser
     raise 'Malformed sitemap, url without loc'
   end
 
-  private
-
   def parse_sitemap_index
     found_urls = []
 
-    urls = sitemapindex.search('sitemap')
-    urls = filter_sitemap_urls(urls)
-    urls.each do |sitemap|
+    new_urls = sitemapindex.search('sitemap')
+    new_urls = filter_sitemap_urls(new_urls)
+    new_urls.each do |sitemap|
       child_sitemap_location = sitemap.at('loc').content
-      found_urls << self.class.new(child_sitemap_location, recurse: @options[:recurse]).urls
+      if URI.parse(child_sitemap_location).relative?
+        child_sitemap_location = URI::HTTP.build(host: @url_parsed.host, path: child_sitemap_location).to_s
+      end
+      rec_sitemap = self.class.new(child_sitemap_location, recurse: @options[:recurse])
+
+      found_urls << rec_sitemap.urls
     end
 
     found_urls.flatten
